@@ -363,13 +363,13 @@ class Minecraft:
         return Minecraft.data(packet_id, payload, padding)
 
     @staticmethod
-    def data_with_multiplier(*payload: bytes, multiplier: int = 1) -> bytes:
+    def data_with_multiplier(*payload: bytes, multiplier: int = 5) -> bytes:
         original = b''.join(payload)
         multiplied = original * multiplier
         return Minecraft.varint(len(multiplied)) + multiplied
 
     @staticmethod
-    def chat(protocol: int, message: str, multiplier: int = 1) -> bytes:
+    def chat(protocol: int, message: str, multiplier: int = 5) -> bytes:
         packet_id = Minecraft.varint(
             0x03 if protocol >= 755 else
             0x03 if protocol >= 464 else
