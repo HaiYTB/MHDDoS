@@ -65,7 +65,9 @@ def udp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
             if sent % 100000 == 0:
                 print(f"{CYAN}[{timestamp()}][UDP-{thread_id}] Packets: {sent}{RESET}")
         except Exception as e:
-            pass
+            print(f"{RED}[UDP-{thread_id}] Error: {e}{RESET}")
+            time.sleep(delay)
+            delay = min(0.1, delay + 0.001)
 
 
 def tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
