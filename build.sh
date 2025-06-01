@@ -1,1 +1,1 @@
-gcc ddos.c -O3 -Ofast -flto -march=native -mtune=native -funroll-loops -fomit-frame-pointer -ffast-math -fno-stack-protector -fno-pie -no-pie -o ddos -lpthread
+gcc ddos.c -O3 -ffast-math -flto -march=native -mtune=native -funroll-loops -fomit-frame-pointer -fno-stack-protector -fno-pie -no-pie -lpthread -o ddos
