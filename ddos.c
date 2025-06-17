@@ -11,8 +11,8 @@
 #include <fcntl.h>
 #include <time.h>
 
-#define MAX_BATCH 65535
-#define SO_SNDBUF_SIZE (1024 * 1024 * 32)
+#define MAX_BATCH 128
+#define SO_SNDBUF_SIZE (1024 * 1024 * 4)
 
 int pps_counter = 0;
 int mbps_counter = 0;
